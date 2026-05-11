@@ -1,0 +1,4 @@
+interface:
+  display_name: "China Railway 12306"
+  short_description: "Query China Railway 12306 read-only train data."
+  default_prompt: "Query China Railway 12306 train information using read-only public web endpoints."
