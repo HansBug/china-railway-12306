@@ -30,6 +30,9 @@ API = {
     "train_stops": "https://kyfw.12306.cn/otn/czxx/queryByTrainNo",
 }
 
+CHINA_TZ = dt.timezone(dt.timedelta(hours=8), "Asia/Shanghai")
+SOURCE_CAVEAT_ZH = "数据来自当前 12306 公开网页端点，非官方开发者 API。"
+
 DEFAULT_REFERER = "https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc"
 
 HEADERS = {
@@ -481,34 +484,59 @@ def dump_json(data: Any) -> None:
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
+def query_timestamp() -> str:
+    return dt.datetime.now(CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S Asia/Shanghai")
+
+
+def with_query_time(query_time: str, data: Any) -> dict[str, Any]:
+    return {"query_time": query_time, "source_caveat": SOURCE_CAVEAT_ZH, "data": data}
+
+
+def print_query_header(query_time: str) -> None:
+    print(f"查询时间: {query_time}")
+    print(SOURCE_CAVEAT_ZH)
+
+
 def print_stations(rows: list[dict[str, Any]]) -> None:
     if not rows:
-        print("No stations found.")
+        print("没有查到匹配的车站。")
         return
     for row in rows:
-        print(f"{row['name']:<10} {row['code']:<4} {row['city']:<8} {row['pinyin']:<24} {row['short']}")
+        print(f"{row['name']}：telecode {row['code']}，城市 {row['city']}，拼音 {row['pinyin']}，简拼 {row['short']}。")
+
+
+def availability_text(value: str) -> str:
+    if value == "有":
+        return "有票"
+    if value == "无":
+        return "无票"
+    if value.isdigit():
+        return f"{value}张"
+    if value in {"候补", "无座"}:
+        return value
+    return value
 
 
 def format_seats(seats: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for seat in seats[:6]:
-        availability = seat.get("available") or "-"
+        availability = availability_text(str(seat.get("available") or "-"))
         if "price" in seat:
-            parts.append(f"{seat['name']}:{availability}/¥{seat['price']}")
+            parts.append(f"{seat['name']} {availability}/¥{seat['price']}")
         else:
-            parts.append(f"{seat['name']}:{availability}")
-    return " ".join(parts)
+            parts.append(f"{seat['name']} {availability}")
+    return "，".join(parts)
 
 
 def print_tickets(rows: list[dict[str, Any]]) -> None:
     if not rows:
-        print("No tickets found.")
+        print("没有查到符合条件的车次。")
         return
     for row in rows:
         print(
-            f"{row['train']:<8} {row['origin']['name']}({row['origin']['code']}) -> "
-            f"{row['dest']['name']}({row['dest']['code']})  "
-            f"{row['depart']}-{row['arrive']} {row['duration']:<6}  {format_seats(row['seats'])}"
+            f"{row['train']}：{row['origin']['name']}到{row['dest']['name']}，"
+            f"{row['depart']} 发车，{row['arrive']} 到达，历时 {row['duration']}；"
+            f"{format_seats(row['seats'])}。"
         )
 
 
@@ -517,46 +545,50 @@ def print_price(data: dict[str, Any]) -> None:
     ticket = data.get("ticket")
     if ticket:
         print(
-            f"{ticket['train']} {ticket['origin']['name']} -> {ticket['dest']['name']} "
-            f"{ticket['depart']}-{ticket['arrive']}"
+            f"{ticket['train']}：{ticket['origin']['name']}到{ticket['dest']['name']}，"
+            f"{ticket['depart']} 发车，{ticket['arrive']} 到达。"
         )
     for key in sorted(prices):
         value = prices[key]
         if isinstance(value, str) and value.startswith("¥"):
-            print(f"{SEAT_NAMES.get(key, key):<8} {value}")
+            print(f"{SEAT_NAMES.get(key, key)}：{value}")
 
 
 def print_stops(data: dict[str, Any]) -> None:
     stops = data.get("stops") or []
     if not stops:
-        print("No stops found.")
+        print("没有查到经停站。")
         return
-    print(f"{data['train']} {data['date']} train_no={data['train_no']}")
+    print(f"{data['train']} 在 {data['date']} 的内部 train_no 是 {data['train_no']}，经停 {len(stops)} 站：")
     for stop in stops:
         print(
-            f"{str(stop.get('station_no') or ''):>2}  {stop.get('station'):<10} "
-            f"arr {stop.get('arrive') or '----':<5} dep {stop.get('depart') or '----':<5} "
-            f"stop {stop.get('stopover') or '----'}"
+            f"{str(stop.get('station_no') or '')}. {stop.get('station')}："
+            f"到达 {stop.get('arrive') or '----'}，发车 {stop.get('depart') or '----'}，"
+            f"停留 {stop.get('stopover') or '----'}。"
         )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Query read-only China Railway 12306 web data.")
+    parser = argparse.ArgumentParser(
+        description="Query read-only China Railway 12306 web data.",
+        epilog="For normal human travel answers, omit --json and use the natural-language output.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_stations = sub.add_parser("stations", help="Search station dictionary.")
     p_stations.add_argument("query", nargs="?", default="", help="Station/city/pinyin/telecode query.")
     p_stations.add_argument("--limit", type=int, default=20)
-    p_stations.add_argument("--json", action="store_true")
+    p_stations.add_argument("--json", action="store_true", help="Machine-readable output only.")
 
     p_tickets = sub.add_parser("tickets", help="Query ticket rows between stations.")
+    p_tickets.add_argument("station_args", nargs="*", metavar="STATION", help="Optional FROM TO station names.")
     p_tickets.add_argument("--date", required=True)
-    p_tickets.add_argument("--from", dest="from_station", required=True)
-    p_tickets.add_argument("--to", dest="to_station", required=True)
+    p_tickets.add_argument("--from", dest="from_station")
+    p_tickets.add_argument("--to", dest="to_station")
     p_tickets.add_argument("--train-prefix", default="", help="Filter by train prefix, e.g. G, GD, DCK.")
     p_tickets.add_argument("--sort", choices=["depart", "arrive", "duration"], default="depart")
-    p_tickets.add_argument("--limit", type=int, default=20)
-    p_tickets.add_argument("--json", action="store_true")
+    p_tickets.add_argument("--limit", type=int, default=3)
+    p_tickets.add_argument("--json", action="store_true", help="Machine-readable output only.")
 
     p_price = sub.add_parser("price", help="Query fares via queryTicketPrice.")
     p_price.add_argument("--date", required=True)
@@ -567,27 +599,41 @@ def build_parser() -> argparse.ArgumentParser:
     p_price.add_argument("--from-station-no")
     p_price.add_argument("--to-station-no")
     p_price.add_argument("--seat-types")
-    p_price.add_argument("--json", action="store_true")
+    p_price.add_argument("--json", action="store_true", help="Machine-readable output only.")
 
     p_stops = sub.add_parser("stops", help="Query stop list for a train.")
     p_stops.add_argument("train")
     p_stops.add_argument("--date", required=True)
     p_stops.add_argument("--train-no", help="Internal train_no if already known.")
-    p_stops.add_argument("--json", action="store_true")
+    p_stops.add_argument("--json", action="store_true", help="Machine-readable output only.")
 
     return parser
 
 
 def run(args: argparse.Namespace) -> int:
     client = Rail12306Client()
+    query_time = query_timestamp()
 
     if args.command == "stations":
         rows = client.search_stations(args.query, limit=max(args.limit, 1))
-        dump_json(rows) if args.json else print_stations(rows)
+        if args.json:
+            dump_json(with_query_time(query_time, rows))
+        else:
+            print_query_header(query_time)
+            print_stations(rows)
         return 0
 
     if args.command == "tickets":
-        rows = client.query_tickets(args.date, args.from_station, args.to_station)
+        from_station = args.from_station
+        to_station = args.to_station
+        if args.station_args:
+            if len(args.station_args) != 2:
+                raise ValueError("tickets positional usage is: tickets FROM TO --date YYYY-MM-DD")
+            from_station = from_station or args.station_args[0]
+            to_station = to_station or args.station_args[1]
+        if not from_station or not to_station:
+            raise ValueError("tickets requires --from/--to or positional FROM TO station names")
+        rows = client.query_tickets(args.date, from_station, to_station)
         if args.train_prefix:
             prefixes = tuple(args.train_prefix.upper())
             rows = [row for row in rows if row["train"].upper().startswith(prefixes)]
@@ -597,7 +643,11 @@ def run(args: argparse.Namespace) -> int:
             rows.sort(key=lambda row: row.get(args.sort) or "")
         if args.limit:
             rows = rows[: max(args.limit, 0)]
-        dump_json(rows) if args.json else print_tickets(rows)
+        if args.json:
+            dump_json(with_query_time(query_time, rows))
+        else:
+            print_query_header(query_time)
+            print_tickets(rows)
         return 0
 
     if args.command == "price":
@@ -612,12 +662,20 @@ def run(args: argparse.Namespace) -> int:
                 "price requires either --train with --from/--to, or --train-no with "
                 "--from-station-no/--to-station-no/--seat-types"
             )
-        dump_json(result) if args.json else print_price(result)
+        if args.json:
+            dump_json(with_query_time(query_time, result))
+        else:
+            print_query_header(query_time)
+            print_price(result)
         return 0
 
     if args.command == "stops":
         result = client.query_stops(args.train, args.date, train_no=args.train_no)
-        dump_json(result) if args.json else print_stops(result)
+        if args.json:
+            dump_json(with_query_time(query_time, result))
+        else:
+            print_query_header(query_time)
+            print_stops(result)
         return 0
 
     raise ValueError(f"unknown command: {args.command}")

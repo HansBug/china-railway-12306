@@ -2,6 +2,34 @@
 
 This repository is a Codex and Claude Code skill for low-frequency, read-only China Railway 12306 lookups.
 
+When a user asks a normal mainland China railway travel question, such as
+checking tomorrow's trains, tickets, fares, times, or stops, use this skill even
+from an arbitrary local working directory. The user does not need to name the
+skill, mention 12306, or know station telecodes.
+Resolve the helper script from the installed skill directory instead of assuming
+the current directory is this repo:
+
+```bash
+RAIL12306_SCRIPT="${RAIL12306_SCRIPT:-$HOME/.codex/skills/china-railway-12306/scripts/rail12306.py}"
+[ -f "$RAIL12306_SCRIPT" ] || RAIL12306_SCRIPT="$HOME/.claude/skills/china-railway-12306/scripts/rail12306.py"
+```
+
+For station-to-station train, ticket, time, and fare questions, run one command
+like `python3 "$RAIL12306_SCRIPT" tickets 北京 杭州 --date YYYY-MM-DD --limit 3`.
+The `tickets` output already includes parsed fares; call `price` only when the
+user asks about a specific train or the ticket row lacks fares. Do not run
+`--help` as part of a normal travel answer.
+
+For user-facing answers, prefer concise natural language with train number,
+departure/arrival time, remaining seats, fare, and practical booking advice when
+useful. Use JSON only when the user explicitly asks for structured output or
+another tool needs it. Every answer based on live 12306 data must state the
+second-level query timestamp captured immediately before the API/script call.
+When using `scripts/rail12306.py`, copy the script's `查询时间` value into the
+final answer. For Chinese answers, include this exact source caveat once:
+`数据来自当前 12306 公开网页端点，非官方开发者 API。` End Chinese live-data
+answers with this exact sentence: `以上为本次实时查询结果。`
+
 ## Scope
 
 - Keep `SKILL.md` concise and focused on agent behavior.

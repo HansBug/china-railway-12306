@@ -8,9 +8,11 @@
 
 ## 演示
 
-下面的 GIF 展示了真实的交互式 `codex` 运行：Codex 读取本 skill，并调用内置 12306 查询脚本。
+下面的 GIF 展示了真实的交互式 `codex` 运行：启动目录是 `/tmp`，不是本仓库；用户只问普通出行问题，Codex 触发已安装的 skill，调用内置 12306 查询脚本，并返回车次时间、余票、票价和秒级查询时间。
 
 ![Codex 调用中国铁路 12306 skill](assets/codex-demo.gif)
+
+MP4 版本：[assets/codex-demo.mp4](assets/codex-demo.mp4)
 
 ## 这个仓库包含什么
 
@@ -50,10 +52,13 @@ git clone git@github.com:HansBug/china-railway-12306.git \
 
 ```bash
 python3 scripts/rail12306.py stations 北京南
+python3 scripts/rail12306.py tickets 北京 杭州 --date 2026-05-20 --limit 3
 python3 scripts/rail12306.py tickets --date 2026-05-20 --from 北京南 --to 上海虹桥 --limit 5
 python3 scripts/rail12306.py price --date 2026-05-20 --from 北京南 --to 上海虹桥 --train G1
 python3 scripts/rail12306.py stops G1 --date 2026-05-20
 ```
+
+自然语言输出会显示 `查询时间`，该时间是在调用实时网页端点前捕获的北京时间，精确到秒。JSON 输出会使用顶层 `query_time`、`source_caveat` 和 `data` 字段包裹结果。
 
 需要给 Agent 或其他程序消费时，加 `--json`：
 
@@ -75,11 +80,12 @@ py scripts\rail12306.py stops G1 --date 2026-05-20 --json
 
 ## Agent 调用示例
 
+安装到 `~/.codex/skills/china-railway-12306` 或 `~/.claude/skills/china-railway-12306` 后，这个 skill 设计为可从任意本地工作目录触发。用户不需要提到 12306、telecode 或本仓库。
+
 示例提示词：
 
 ```text
-使用 china-railway-12306 skill 查询 2026-05-20 的 G1 经停站。
-返回 train_no 和停靠站列表。
+帮我查一下北京到杭州明天三趟车，直接告诉我时间、余票和价格。
 ```
 
 在当前仓库里临时测试交互式 Codex：
@@ -91,8 +97,7 @@ codex -C . --dangerously-bypass-approvals-and-sandbox --no-alt-screen
 然后输入：
 
 ```text
-使用这个仓库里的 china-railway-12306 skill 查询 2026-05-20 的 G1 经停站。
-只返回 train_no 和停靠站列表，不要修改文件。
+帮我查一下北京到杭州明天三趟车，直接告诉我时间、余票和价格。
 ```
 
 在当前仓库里临时测试 Claude Code：
